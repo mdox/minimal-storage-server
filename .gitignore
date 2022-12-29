@@ -1,3 +1,4 @@
 node_modules
-storage
+_storage
+_upload
 pnpm-lock.yaml
