@@ -13,119 +13,92 @@ server.use(cors());
 server.use(express.json());
 server.use(express.static(storagePath));
 
-server.post("/accessible", accessible);
-server.post("/:collection", upload);
-server.delete("/", deletion);
+server.post("/upload/:collection", handleUpload);
+server.post("/delete/:collection", handleDelete);
 
 server.listen(port, () => {
   console.log(`Listening on port: ${port}`);
 });
 
 // Route Functions
+/** @type {express.RequestHandler} */
+async function handleUpload(req, res) {
+  const collection = req.params.collection;
+  const collectionPath = path.join(storagePath, collection);
 
-/** @type {import("express").RequestHandler} */
-function accessible(req, res) {
-  /** @type {string[]} */
-  const uriPaths = req.body;
+  /** @type {formidable.File[]} */
+  const files = await new Promise((resolve, reject) => {
+    formidable({
+      hashAlgorithm: "md5",
+      multiples: true,
+      allowEmptyFiles: false,
+      maxFileSize: 1024 * 1024 * 100,
+    }).parse(req, (err, _fields, files) => {
+      if (err) res.status(500).send(void reject(err));
+      else resolve(Array.isArray(files.file) ? files.file : [files.file]);
+    });
+  });
 
-  Promise.allSettled(
-    uriPaths.map((uriPath) =>
-      fs.access(path.join(storagePath, uriPath), fs.constants.R_OK)
-    )
-  ).then((settledResults) => {
-    /** @type {boolean[]} */
-    const results = settledResults.map(
-      (settledResult) => settledResult.status === "fulfilled"
+  const paths = [];
+
+  for (const file of files) {
+    const filepath = path.join(
+      collectionPath,
+      Buffer.from(file.hash, "hex").toString("base64url"),
+      file.originalFilename
     );
 
-    res.json(ResultObject(results));
-  });
+    try {
+      await fs.mkdir(path.dirname(filepath), { recursive: true });
+      await fs.copyFile(file.filepath, filepath, fs.constants.COPYFILE_EXCL);
+
+      paths.push(filepath.replace(storagePath, ""));
+    } catch (err) {
+      console.error(err);
+      paths.push(0);
+    }
+  }
+
+  res.json(paths);
 }
 
-/** @type {import("express").RequestHandler} */
-function upload(req, res) {
-  formidable({
-    hashAlgorithm: "MD5",
-    multiples: true,
-    allowEmptyFiles: false,
-    maxFileSize: 104900000,
-  }).parse(req, async (err, _fields, files) => {
-    if (err) {
-      res.json(ErrorObject());
-      return;
+/** @type {express.RequestHandler} */
+async function handleDelete(req, res) {
+  const items = req.body;
+  const collection = req.params.collection;
+  const collectionPath = path.join(storagePath, collection);
+
+  const fails = [];
+
+  for (const key in items) {
+    const index = parseInt(key);
+    const item = items[index];
+    const [filehash = "MISS", filename = "MISS"] = item.split("/");
+    const filepath = path.join(collectionPath, filehash, filename);
+
+    if (!filepath.startsWith(collectionPath)) {
+      fails.push(index);
+      continue;
     }
 
-    const paths = (
-      await Promise.allSettled(
-        (Array.isArray(files.file) ? files.file : [files.file]).map(
-          async (file) => {
-            const filePath = path.join(
-              storagePath,
-              req.params.collection,
-              file.hash,
-              file.originalFilename
-            );
-
-            await fs.mkdir(path.dirname(filePath), {
-              recursive: true,
-            });
-
-            await fs.copyFile(
-              file.filepath,
-              filePath,
-              fs.constants.COPYFILE_EXCL
-            );
-
-            return filePath.replace(storagePath, "");
-          }
-        )
-      )
-    ).map((result) => {
-      return result.value;
-    });
-
-    res.json(ResultObject(paths));
-  });
-}
-
-/** @type {import("express").RequestHandler} */
-function deletion(req, res) {
-  /** @type {string[]} */
-  const uriPaths = req.body;
-
-  Promise.allSettled(
-    uriPaths.map(async (uriPath) => {
-      const [collection, id, filename] = uriPath.split("/").filter(Boolean);
-
-      if (!collection) throw new Error("Invalid collection.");
-      if (!id) throw new Error("Invalid id.");
-      if (!filename) throw new Error("Invalid filename.");
-
+    try {
+      await fs.unlink(filepath);
       try {
-        await fs.rm(path.join(storagePath, collection, id, filename));
-        await fs.rmdir(path.join(storagePath, collection, id));
-        await fs.rmdir(path.join(storagePath, collection));
+        await fs.rmdir(path.join(filepath, ".."));
+        await fs.rmdir(path.join(collectionPath));
       } catch (err) {
         if (err.code !== "ENOTEMPTY") {
           console.error(err);
-          throw err;
+          fails.push(index);
         }
       }
-    })
-  ).then((settledResults) => {
-    /** @type {boolean[]} */
-    const results = settledResults.map(
-      (settledResult) => settledResult.status === "fulfilled"
-    );
+    } catch (err) {
+      if (err.code !== "ENOENT") {
+        console.error(err);
+      }
+      fails.push(index);
+    }
+  }
 
-    res.json(ResultObject(results));
-  });
-}
-
-// Util Functions
-
-function ResultObject(data) {
-  return {
-    data,
-  };
+  res.json(fails);
 }
