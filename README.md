@@ -60,79 +60,96 @@ Response Body:
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MSS Tester</title>
+    <title>MSSv2.0</title>
     <style>
       body {
         font-family: sans-serif;
         font-size: 1rem;
         line-height: 1.5;
+        margin: 0;
+        padding: 0.5rem;
       }
 
       form {
-        margin: 0.5rem 0 0.5rem;
         display: flex;
         flex-direction: column;
         align-items: flex-start;
         gap: 0.5rem;
+        width: 100%;
+        max-width: 768px;
+      }
+
+      form > label {
+        font-weight: 600;
+      }
+
+      textarea {
+        width: 100%;
+        resize: vertical;
+      }
+
+      hr {
+        border: 1px solid black;
+        border-bottom: 0;
       }
     </style>
   </head>
   <body>
-    <form id="uploadForm" onsubmit="handleSubmitForUpload(event)">
-      <span>Upload</span>
+    <form id="upload" onsubmit="handleUpload(event)">
+      <label>Upload</label>
       <input type="file" name="file" multiple />
       <button type="submit">Submit</button>
     </form>
-
-    <form id="deleteForm" onsubmit="handleSubmitForDelete(event)">
-      <span>Delete</span>
-      <textarea name="file"></textarea>
+    <hr />
+    <form id="delete" onsubmit="handleDelete(event)">
+      <label>Delete</label>
+      <textarea rows="5" name="text"></textarea>
       <button type="submit">Submit</button>
     </form>
-
     <script>
-      async function handleSubmitForDelete(event) {
+      const STORAGE_URL = "http://localhost:8000";
+      const COLLECTION = "test";
+
+      async function handleUpload(event) {
         event.preventDefault();
 
-        const form = document.getElementById("deleteForm");
+        const form = event.currentTarget;
         const formData = new FormData(form);
-        const text = formData.get("file");
 
-        const paths = text.split(/\n/);
-
-        const response = await fetch("http://localhost:8000/delete/test", {
+        const response = await fetch(`${STORAGE_URL}/upload/${COLLECTION}`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(paths),
+          body: formData,
         });
 
         if (response.ok) {
-          const data = await response.json();
-
-          if (data.success) {
-            console.log(data.data);
-          }
+          console.log(await response.json());
+        } else {
+          console.error(await response.text());
         }
       }
 
-      async function handleSubmitForUpload(event) {
+      async function handleDelete(event) {
         event.preventDefault();
 
-        const form = document.getElementById("uploadForm");
+        const form = event.currentTarget;
+        const formData = new FormData(form);
 
-        const response = await fetch("http://localhost:8000/upload/test", {
+        const text = formData.get("text");
+
+        const items = text.split(/\n/).map((item) => item.split("/"));
+
+        const response = await fetch(`${STORAGE_URL}/delete/${COLLECTION}`, {
           method: "POST",
-          body: new FormData(form),
+          body: JSON.stringify(items),
+          headers: {
+            "Content-Type": "application/json",
+          },
         });
 
         if (response.ok) {
-          const data = await response.json();
-
-          if (data.success) {
-            console.log(data.data);
-          }
+          console.log(await response.json());
+        } else {
+          console.error(await response.text());
         }
       }
     </script>
